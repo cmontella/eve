@@ -1,0 +1,149 @@
+# Tic Tac Toe
+
+## Game Logic
+
+The game board is square, with a given `size`. It contains size ^ 2 cells,
+each with a row and column index.
+```
+  match
+    [#session-connect]
+
+    // board constants
+    size = 3
+    starting-player = "X"
+
+    // generate the cells
+    i = range[from: 0, to: size]
+    j = range[from: 0, to: size]
+    
+ commit
+    board = [@board size player: starting-player]
+    [#cell board row: i column: j]
+```
+
+Diagonal cells have a row index equal to its column index
+```
+  match
+    cells = [#cell row column]
+    row = column
+  bind
+    cells += #diagonal
+```
+
+Anti-diagonal cells satisfy the equation `row + col = N - 1`, 
+where N is the size of the board.
+```
+  match
+    cells = [#cell row column]
+    [@board size]
+    row + column = size - 1
+  bind
+    cells += #anti-diagonal
+```
+
+A game is won when a player marks N cells in a row, column, or diagonal.
+The game can end in a tie, where no player has N in a row.
+```
+  match
+    board = [@board size: N, not(winner)]
+                     // Check for a winning row
+    (winner, cell) = if cell = [#cell row player]
+                       N = count[given: cell, per: (row, player)] then (player, cell)
+                     // Check for a winning column
+                     else if cell = [#cell column player]
+                       N = count[given: cell, per: (column, player)] then (player, cell)
+                     // Check for a diagonal win
+                     else if cell = [#diagonal row column player]
+                       N = count[given: cell, per: player] then (player, cell)
+                     // Check for an anti-diagonal win
+                     else if cell = [#anti-diagonal row column player]
+                       N = count[given: cell, per: player] then (player, cell)
+                     // If all cells are filled  but there are no winners
+                     else if cell = [#cell player]
+                       N * N = count[given: cell] then ("nobody", cell)
+  commit
+    board.winner := winner
+    cell += #winner
+```
+
+We use the `count` aggregate in the above block. Count returns the number of elements (the cardinality)
+of `given`. The optional `per` attribute allows you to specify a grouping. 
+
+In `count[given: cell, per: player]`, since we group by `player`, count returns two values: the count of `X` elements and the count of `O` elements. This can be read "count the cells per player". In another line, we group by `column` and `player`. This will return `N * 2` results: one result for every player for every column. Like wise with the row case. By equating this with N, we only ensure the winning player is only returned when it has N elements in the given direction.
+
+We first search every row, then every column. Finally we check the diagonal and anti-diagonal. To do this, we leverage the `#diagonal` and `#anti-diagonal` tags we created earlier; instead of selecting `[#cell]`, we can select on `[#diagonal]` and `[#anti-diagonal]` to select only a subset of cells.
+
+## Events
+
+Click on a cell to make your move
+```
+  match
+    [#click #direct-target element: [#div cell]]
+    not(cell.player)
+    board = [@board player: current not(winner)]
+    next_player = if current = "X" then "O"
+                  else "X"
+  commit
+    board.player := next_player
+    cell.player := current
+```
+
+Reset the board state after a win. A reset consists of:
+- Clearing the board of a `winner`
+- Clearing all of the cells
+- Removing the `#winner` tag from the winning cell set
+```
+  match
+    [#click #direct-target]
+    board = [@board winner]
+    cell = [#cell player]
+  commit
+    board.winner -= winner
+    cell.player -= player
+    cell -= #winner
+```
+
+## Drawing the Game Board
+
+Draw the board
+```
+  match
+    board = [@board]
+    cell = [#cell board row column]
+    contents = if cell.player then cell.player
+              else ""
+  bind
+    [#div board @container style: [font-family: "sans-serif"], children:
+      [#div #status board class: "status", style: [text-align: "center", width: 150, padding-bottom: 10]]
+      [#div class: "board" children:
+        [#div class: "row", sort: row, style: [color: "black"], children:
+          [#div #cell class: "cell" cell text: contents sort: column style:
+            [display: "inline-block" width: "50px" height: "50px" border: "1px solid black" background: "white" font-size: "2em" line-height: "50px" text-align: "center"]]]]
+```
+
+Winning cells are drawn in a different color
+```
+  match 
+    winning-cells = [#cell #winner]
+    cell-elements = [#div cell: winning-cells, style]
+  bind 
+    style.color := "red"
+```
+
+Display the current player if the game is won
+```
+  match
+    status = [#status board]
+    not(board.winner)
+  bind
+    status.text += "It's {{board.player}}'s turn!"
+```
+
+When the game is won, display the winner
+```
+  match
+    status = [#status board]
+    winner = board.winner
+  bind
+    status.text += "{{winner}} wins! Click anywhere to restart!"
+```
