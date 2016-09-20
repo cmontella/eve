@@ -1,0 +1,186 @@
+# Lunch With Eve App
+
+## List of team members
+
+Team members are all of the employees of Eve.
+
+```
+  commit
+    [@Eve]
+    // Rob is the CLO
+    [@Rob #CLO #team-member slack-name: "rob" e-mail: "rob@kodowa.com"] 
+    [@Corey #team-member slack-name: "corey" e-mail: "corey@kodowa.com"]
+    [@Chris #team-member slack-name: "ibdknox" e-mail: "chris@kodowa.com"]
+    [@Josh #team-member slack-name: "jjosh" e-mail: "josh@kodowa.com"]
+    [@Eric #team-member slack-name: "eric" e-mail: "eric@kodowa.com"]
+```
+
+Team members are part of the Eve organization
+
+```
+  match
+    Eve = [@Eve]
+    team-members = [#team-member]
+  commit
+    Eve.team-members := team-members
+```
+
+## Assign picks
+
+Each week, lunch gets picked for Monday through Thursday; Friday is leftovers day where nobody picks, and weekends obviously we’re not in the office. These precise rules might change if we grow larger or have folks who start working weekends, so ideally I’d like to create a system that I don’t have to completely rewrite if we hire more people or change our lunch picking schedule
+
+At Midnight on Sunday, the team members are reset
+
+```
+ match
+   [#date day: "Sunday"]
+   [#time hour: 0]
+   team-members = [#team-member]
+ commit
+   team-members -= #picked
+   team-members.pick := ""   
+```
+
+### Semi-random rules
+
+I don’t actually want a true randomization of picks; as the Chief Lunch Officer, my kitchen is not a democracy but a benign dictatorship. 
+
+The CLO always picks on Monday. 
+
+```
+  match
+    CLO = [#CLO]
+    Eve = [@Eve]
+  commit
+    Eve.Monday := CLO
+```
+
+
+```
+  match
+    [@Eve Monday]
+  bind
+    [#div text: "{{Monday.name}}"]
+```
+
+After that, the remaining 3 days worth of choices fall to the other 4 team members, which means one person doesn’t get to choose a lunch each week. A true randomization would be agnostic of who that person is, but I want to make sure nobody gets skipped two weeks in a row. Past that, there are enough weeks in the year that the law of averages should make sure everyone gets approximately the same number of picks.
+
+## Notify team members
+
+Team members are all notified on Sunday night at 8:00 PM prior to the start of the week which day their pick is via a private Slack message. 
+
+```
+  match
+    [#date day: "Sunday"]
+    [#time hours: 20]
+    team-member = [#team-member]
+    message = "Hello {{team-member.name}}, \n Your lunch pick is on {{team-member.pick-day}}. Please respond by midnight on the day of your pick, or else the CLO will pick for you. You don't want the CLO to pick for you. \n Happy lunching, \n LunchBot"
+  commit
+    [#slack #message username: "LunchBot" recipient: team-member.slack-name, text: message]
+```
+
+If a team member hasn't made his selection 24 hours before his designated lunch day, they'll be reminded.
+
+```
+  match
+    [#date day: pick-day - 1]
+    team-member = [#team-member pick-day not(#picked)]
+    message = "Hello {{team-member.name}}, \n I see that you haven't picked lunch for tomorrow yet. Please submit your lunch pick before midnight or you will forfeit your choice. \n Happy lunching, \n LunchBot"
+  commit
+    [#slack #message username: "LunchBot" recipient: team-member.slack-name, text: message]
+```
+
+If a team member doesn’t pick by midnight the day before their lunch day, his choice is forfeit and the pick defaults to the original Eve lunch: turkey burgers.
+
+```
+  match
+    team-member = [#team-member pick-day not(#picked)]
+    [#date day: pick-day]
+  commit
+    team-member += #forfeit
+    team-member.pick := “Forfeited - Turkey Burger”
+```
+
+## Collect responses
+
+Team members can submit their pick via a web application or via Slack. In the web application method, a Team member visits a website and logs in with his Eve Google credentials. Then, he can fill out a form, indicating his lunch pick.
+
+```
+```
+
+In the slack method, a team member can simply reply to lunchbot with his selection. 
+
+```
+  match
+    [#slack #message username: team-member.slack-name recipient: "LunchBot", text: pick not("picks")] // TODO Explain why not("picks") is necessary
+    not([#slack attachment]) 
+    team-member = [#team-member slack-name]
+  commit
+    team-member += #picked
+    team-member.pick := pick
+```
+
+### Changing a pick
+
+Provided it is still before the midnight deadline, a team member can change his pick by simply submitting a new choice in the form. This will throw out the old pick and update it to the new one.
+
+### Vetoing a Pick
+
+If the CLO finds the lunch choice objectionable for any reason (remember, benign dictatorship), then he can veto the pick. This will send a notification to the team member, instructing him to pick again.
+
+## Notify Chief Lunch Officer (CLO)
+
+The Chief Lunch Officer should be able to check the lunch picks at any time during the week to get a sense of what people are picking.
+
+```
+  match
+    CLO = [#CLO]
+    [#slack #message username: CLO.slack-name recipient: "LunchBot" text: "picks"]
+    team-members = [#team-member]
+    message = "{{team-member.name}} picked {{team-member.pick}} for {{team-member.pick-day}}."
+  commit
+    [#slack #message username: "LunchBot" recipient: CLO.slack-name, text: message]
+```
+
+Since picks are not final until midnight the day of that lunch and can be changed, the CLO won’t get an official notification of the lunch pick until midnight, which will be via a private message in Slack.
+
+```
+  match
+    [#time hours: 0] // Midnight
+    [#date day: pick-day]
+    CLO = [#CLO]
+    team-member = [#team-member pick-day pick]
+    message = "Hey {{CLO.name}}, \n {{team-member.name}} picked {{pick}} for lunch today."
+  commit
+    [#slack #message username: "LunchBot" recipient: CLO.slack-name, text: message]
+```
+
+When team members give their lunch pick, the CLO is notified. How?
+
+- Email?
+- Slack?
+- In the Eve app?
+
+## Twitter Posting
+
+When lunch is ready, the CLO captures the deliciousness with his camera and posts it to Twitter. The lunch with Eve app listens to @lunchwitheve for the latest tweet and saves the photo
+
+```
+  match
+    CLO = [#CLO]
+    [#slack #message username: CLO.slack-name, recipient: "LunchBot", attachment: [type: "JPG" file: picture], text]
+  commit
+    [#twitter username: "lunchwitheve", tweet: text, picture]
+```
+
+## Web Interface
+
+There is a web interface for interacting with the lunch app!
+
+### System Overview
+
+The CLO will have an administrative overview of the lunch database. He’ll be able to assign days to team members, send reminders at any time, or ban people from picking lunch if they insist on picking inedible things.
+
+### Lunch Explorer
+
+Team members can browse previous lunches, using a variety of filters. Tags can be added to lunches by anyone (unless the CLO revoked that privilege) for sorting and filtering purposes. Lunches can also be rated by team members, so we can find out which dishes were popular.
